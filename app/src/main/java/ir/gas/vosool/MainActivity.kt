@@ -1,77 +1,113 @@
-
 package ir.gas.vosool
 
 import android.app.Activity
 import android.os.Bundle
-import android.graphics.Color
+import android.content.Intent
+import android.net.Uri
+import android.graphics.Typeface
 import android.view.Gravity
-import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 
 class MainActivity : Activity() {
 
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
+private lateinit var statusText: TextView
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+private val excelPicker =
+    registerForActivityResultCompatPlaceholder()
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(20), dp(28), dp(20), dp(20))
-            setBackgroundColor(Color.rgb(245, 248, 252))
-        }
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
 
-        val title = TextView(this).apply {
-            text = "وصول مطالبات گاز قادر خرمشهر"
-            textSize = 24f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(20, 65, 110))
-            setPadding(0, dp(20), 0, dp(16))
-        }
-        root.addView(title)
+    val layout = LinearLayout(this)
+    layout.orientation = LinearLayout.VERTICAL
+    layout.setPadding(32, 40, 32, 32)
+    layout.gravity = Gravity.CENTER_HORIZONTAL
 
-        val description = TextView(this).apply {
-            text = "سامانه اطلاع‌رسانی بدهی مشترکین"
-            textSize = 17f
-            gravity = Gravity.CENTER
-            setTextColor(Color.DKGRAY)
-        }
-        root.addView(description)
+    val title = TextView(this)
+    title.text = "وصول مطالبات گاز قادر خرمشهر"
+    title.textSize = 23f
+    title.typeface = Typeface.DEFAULT_BOLD
+    title.gravity = Gravity.CENTER
+    layout.addView(title)
 
-        val status = TextView(this).apply {
-            text = "برای شروع، فایل اکسل مشترکین را انتخاب کنید."
-            textSize = 16f
-            gravity = Gravity.CENTER
-            setPadding(0, dp(24), 0, dp(24))
-        }
-        root.addView(status)
+    val subtitle = TextView(this)
+    subtitle.text = "سامانه مدیریت مطالبات و پیامک مشترکان"
+    subtitle.textSize = 16f
+    subtitle.gravity = Gravity.CENTER
+    subtitle.setPadding(0, 20, 0, 32)
+    layout.addView(subtitle)
 
-        val importButton = Button(this).apply {
-            text = "انتخاب فایل اکسل"
-            isAllCaps = false
-        }
-        root.addView(importButton)
+    val selectButton = Button(this)
+    selectButton.text = "انتخاب فایل اکسل"
+    layout.addView(
+        selectButton,
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+    )
 
-        importButton.setOnClickListener {
-            status.text =
-                "مرحله ورود اکسل در نسخه بعدی تکمیل می‌شود."
-        }
+    statusText = TextView(this)
+    statusText.text = "هنوز فایلی انتخاب نشده است."
+    statusText.textSize = 16f
+    statusText.setPadding(0, 24, 0, 24)
+    layout.addView(statusText)
 
-        val reportButton = Button(this).apply {
-            text = "گزارش پیامک‌ها"
-            isAllCaps = false
-        }
-        root.addView(reportButton)
+    val reportButton = Button(this)
+    reportButton.text = "گزارش پیامک‌ها"
+    layout.addView(
+        reportButton,
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+    )
 
-        reportButton.setOnClickListener {
-            status.text =
-                "گزارش ارسال پس از پیاده‌سازی پایگاه داده نمایش داده می‌شود."
-        }
-
-        setContentView(root)
+    selectButton.setOnClickListener {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.type = "*/*"
+        intent.putExtra(
+            Intent.EXTRA_MIME_TYPES,
+            arrayOf(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel"
+            )
+        )
+        startActivityForResult(intent, 100)
     }
+
+    reportButton.setOnClickListener {
+        statusText.text =
+            "گزارش پیامک‌ها در مرحله پیاده‌سازی است."
+    }
+
+    setContentView(layout)
+}
+
+@Deprecated("Use Activity Result API in a later update")
+override fun onActivityResult(
+    requestCode: Int,
+    resultCode: Int,
+    data: Intent?
+) {
+    super.onActivityResult(requestCode, resultCode, data)
+
+    if (requestCode == 100 && resultCode == RESULT_OK) {
+        val uri: Uri? = data?.data
+
+        if (uri != null) {
+            statusText.text =
+                "فایل انتخاب شد.\nآماده بررسی اطلاعات اکسل هستیم."
+        }
+    }
+}
+
+private fun registerForActivityResultCompatPlaceholder(): Nothing? {
+    return null
+}
+
 }
