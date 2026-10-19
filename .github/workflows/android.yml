@@ -29,6 +29,20 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Diagnose Android Manifest
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          path = "app/src/main/AndroidManifest.xml"
+          print("Checking:", path)
+          try:
+              ET.parse(path)
+              print("Manifest XML syntax: OK")
+          except ET.ParseError as e:
+              print("MANIFEST ERROR:", e)
+              raise SystemExit(1)
+          PY
+
       - name: Build APK
         run: gradle assembleDebug
 
