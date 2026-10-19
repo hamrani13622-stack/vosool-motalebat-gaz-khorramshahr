@@ -2,6 +2,7 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <application
         android:allowBackup="true"
+        android:icon="@drawable/logo_gas"
         android:label="وصول مطالبات گاز قادر خرمشهر"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
