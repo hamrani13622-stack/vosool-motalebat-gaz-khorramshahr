@@ -124,9 +124,10 @@ class MainActivity : Activity() {
         parent.addView(labelView)
 
         val field = EditText(this).apply {
-            hint = hintText
-            singleLine = true
-            textSize = 16f
+    hint = hintText
+    setSingleLine(true)
+    textSize = 16f
+}
         }
         parent.addView(
             field,
