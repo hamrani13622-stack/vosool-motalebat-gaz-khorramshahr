@@ -6,6 +6,7 @@
         android:label="وصول مطالبات گاز قادر خرمشهر"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:icon="@drawable/ic_torch"
         <activity
             android:name=".MainActivity"
             android:exported="true">
