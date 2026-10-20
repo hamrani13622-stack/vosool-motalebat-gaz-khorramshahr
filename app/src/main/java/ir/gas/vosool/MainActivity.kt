@@ -15,6 +15,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : Activity() {
 
@@ -30,35 +33,38 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val page = LinearLayout(this).apply {
+        val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(28, 30, 28, 24)
+            setPadding(28, 24, 28, 24)
         }
 
         val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
         scroll.addView(content)
 
         val title = TextView(this).apply {
             text = "وصول مطالبات گاز قادر خرمشهر"
             textSize = 23f
             gravity = Gravity.CENTER
-            setPadding(0, 8, 0, 24)
+            setPadding(0, 12, 0, 24)
         }
         content.addView(title)
 
         subscriptionInput = addField(
-            content, "شماره اشتراک", "مثلاً 12345678"
+            content,
+            "شماره اشتراک",
+            "مثلاً 12345678"
         )
 
         phoneInput = addField(
-            content, "شماره تلفن همراه", "مثلاً 09xxxxxxxxx"
+            content,
+            "شماره تلفن همراه",
+            "مثلاً 09123456789"
         )
 
         debtInput = addField(
-            content, "مبلغ بدهی به ریال", "مثلاً 12500000"
+            content,
+            "مبلغ بدهی به ریال",
+            "مثلاً 12500000"
         )
 
         val previewButton = Button(this).apply {
@@ -85,8 +91,11 @@ class MainActivity : Activity() {
 
         previewButton.setOnClickListener {
             val message = buildMessage()
+
             if (message == null) {
-                toast("شماره اشتراک، تلفن همراه و مبلغ بدهی را کامل وارد کنید.")
+                toast(
+                    "شماره اشتراک، شماره همراه و مبلغ بدهی را بررسی کنید."
+                )
             } else {
                 statusText.text = message
             }
@@ -100,15 +109,7 @@ class MainActivity : Activity() {
             showHistory()
         }
 
-        page.addView(
-            scroll,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
-        setContentView(page)
+        setContentView(scroll)
     }
 
     private fun addField(
@@ -124,11 +125,11 @@ class MainActivity : Activity() {
         parent.addView(labelView)
 
         val field = EditText(this).apply {
-    hint = hintText
-    setSingleLine(true)
-    textSize = 16f
-}
+            hint = hintText
+            setSingleLine(true)
+            textSize = 16f
         }
+
         parent.addView(
             field,
             LinearLayout.LayoutParams(
@@ -136,15 +137,27 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         )
+
         return field
     }
 
     private fun buildMessage(): String? {
-        val subscription = subscriptionInput.text.toString().trim()
-        val phone = phoneInput.text.toString().trim()
-        val debt = debtInput.text.toString().trim()
+        val subscription =
+            subscriptionInput.text.toString().trim()
 
-        if (subscription.isBlank() || phone.isBlank() || debt.isBlank()) {
+        val phone =
+            phoneInput.text.toString().trim()
+
+        val debtText =
+            debtInput.text.toString().trim()
+                .replace(",", "")
+                .replace("٬", "")
+                .replace(" ", "")
+
+        if (subscription.isBlank() ||
+            phone.isBlank() ||
+            debtText.isBlank()
+        ) {
             return null
         }
 
@@ -152,29 +165,46 @@ class MainActivity : Activity() {
             return null
         }
 
-        if (debt.toLongOrNull() == null || debt.toLong() <= 0L) {
+        val debt = debtText.toLongOrNull()
+            ?: return null
+
+        if (debt <= 0L) {
             return null
         }
 
+        val formattedDebt = String.format(
+            Locale.US,
+            "%,d",
+            debt
+        )
+
         return "مشترک گرامی،\n" +
             "شماره اشتراک: $subscription\n" +
-            "مبلغ بدهی گاز شما $debt ریال است. " +
+            "مبلغ بدهی گاز شما $formattedDebt ریال است. " +
             "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
             "و رسید پرداختی را به این شماره ارسال فرمایید."
     }
 
     private fun confirmAndSend() {
-        val subscription = subscriptionInput.text.toString().trim()
-        val phone = phoneInput.text.toString().trim()
+        val subscription =
+            subscriptionInput.text.toString().trim()
+
+        val phone =
+            phoneInput.text.toString().trim()
+
         val message = buildMessage()
 
         if (message == null) {
-            toast("اطلاعات را بررسی کنید؛ شماره تلفن باید ۱۱ رقم و با 09 شروع شود.")
+            toast(
+                "اطلاعات را بررسی کنید. شماره همراه باید با 09 شروع شود و 11 رقم باشد."
+            )
             return
         }
 
         if (prefs.getBoolean("sent_$subscription", false)) {
-            toast("برای این شماره اشتراک قبلاً ارسال ثبت شده است.")
+            toast(
+                "برای این شماره اشتراک قبلاً درخواست ارسال ثبت شده است."
+            )
             return
         }
 
@@ -182,8 +212,9 @@ class MainActivity : Activity() {
             .setTitle("تأیید نهایی ارسال")
             .setMessage(
                 "شماره اشتراک: $subscription\n" +
-                "شماره همراه: $phone\n\n$message\n\n" +
-                "آیا ارسال این پیامک را تأیید می‌کنید؟"
+                    "شماره همراه: $phone\n\n" +
+                    "$message\n\n" +
+                    "آیا ارسال این پیامک را تأیید می‌کنید؟"
             )
             .setNegativeButton("انصراف", null)
             .setPositiveButton("تأیید و ارسال") { _, _ ->
@@ -202,43 +233,66 @@ class MainActivity : Activity() {
         ) {
             requestPermissions(
                 arrayOf(Manifest.permission.SEND_SMS),
-                200
+                REQUEST_SMS_PERMISSION
             )
-            toast("مجوز پیامک را تأیید کنید؛ سپس دوباره ارسال را بزنید.")
+            toast(
+                "مجوز پیامک را تأیید کنید؛ سپس دوباره ارسال را بزنید."
+            )
             return
         }
 
         try {
             @Suppress("DEPRECATION")
-            val manager = SmsManager.getDefault()
+            val smsManager = SmsManager.getDefault()
 
-            val parts = manager.divideMessage(message)
+            val parts = smsManager.divideMessage(message)
+
             if (parts.size > 1) {
-                manager.sendMultipartTextMessage(
-                    phone, null, parts, null, null
+                smsManager.sendMultipartTextMessage(
+                    phone,
+                    null,
+                    parts,
+                    null,
+                    null
                 )
             } else {
-                manager.sendTextMessage(
-                    phone, null, message, null, null
+                smsManager.sendTextMessage(
+                    phone,
+                    null,
+                    message,
+                    null,
+                    null
                 )
             }
 
             val timestamp = System.currentTimeMillis()
+            val date = SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss",
+                Locale.getDefault()
+            ).format(Date(timestamp))
+
+            val record =
+                "اشتراک: $subscription\n" +
+                "تلفن: $phone\n" +
+                "زمان درخواست ارسال: $date\n" +
+                "وضعیت: درخواست ارسال به سیستم گوشی سپرده شد؛ تحویل تأیید نشده است."
+
             prefs.edit()
                 .putBoolean("sent_$subscription", true)
-                .putString(
-                    "record_$subscription",
-                    "$subscription | $phone | $timestamp"
-                )
+                .putString("record_$subscription", record)
                 .apply()
 
             statusText.text =
                 "درخواست ارسال برای اشتراک $subscription ثبت شد.\n" +
-                "این ثبت به معنی تأیید تحویل پیامک نیست."
+                "تحویل پیامک هنوز تأیید نشده است."
 
-            toast("درخواست ارسال پیامک ثبت شد.")
+            toast("درخواست ارسال ثبت شد.")
+
         } catch (e: Exception) {
-            toast("ارسال انجام نشد: ${e.message ?: "خطای نامشخص"}")
+            toast(
+                "ارسال انجام نشد: " +
+                    (e.message ?: "خطای نامشخص")
+            )
         }
     }
 
@@ -248,31 +302,37 @@ class MainActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(
-            requestCode, permissions, grantResults
+            requestCode,
+            permissions,
+            grantResults
         )
 
-        if (requestCode == 200) {
+        if (requestCode == REQUEST_SMS_PERMISSION) {
             if (grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             ) {
-                toast("مجوز داده شد. اطلاعات را بررسی و دوباره ارسال را انتخاب کنید.")
+                toast(
+                    "مجوز داده شد. اطلاعات را بررسی و دوباره ارسال را انتخاب کنید."
+                )
             } else {
-                toast("بدون مجوز پیامک، امکان ارسال وجود ندارد.")
+                toast(
+                    "بدون مجوز پیامک، امکان ارسال وجود ندارد."
+                )
             }
         }
     }
 
     private fun showHistory() {
-        val all = prefs.all
-        val records = all
+        val records = prefs.all
             .filterKeys { it.startsWith("record_") }
             .values
             .filterIsInstance<String>()
+            .sorted()
 
         val text = if (records.isEmpty()) {
-            "هنوز ارسال ثبت‌شده‌ای وجود ندارد."
+            "هنوز درخواست ارسالی ثبت نشده است."
         } else {
-            records.joinToString("\n\n")
+            records.joinToString("\n\n--------------------\n\n")
         }
 
         AlertDialog.Builder(this)
@@ -283,6 +343,14 @@ class MainActivity : Activity() {
     }
 
     private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    companion object {
+        private const val REQUEST_SMS_PERMISSION = 200
     }
 }
