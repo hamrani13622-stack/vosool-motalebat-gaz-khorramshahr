@@ -6,7 +6,6 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.telephony.SmsManager
 import android.util.Xml
@@ -20,7 +19,9 @@ import android.widget.TextView
 import android.widget.Toast
 import org.xmlpull.v1.XmlPullParser
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 data class Subscriber(
     val subscription: String,
@@ -44,7 +45,7 @@ class MainActivity : Activity() {
 
     companion object {
         private const val PICK_EXCEL = 100
-        private const val SAVE_CSV = 101
+        private const val SAVE_EXCEL = 102
         private const val SMS_PERMISSION = 200
     }
 
@@ -73,12 +74,11 @@ class MainActivity : Activity() {
         }
 
         fun addButton(text: String, action: () -> Unit) {
-            val button = Button(this).apply {
-                this.text = text
-                setOnClickListener { action() }
-            }
             content.addView(
-                button,
+                Button(this).apply {
+                    this.text = text
+                    setOnClickListener { action() }
+                },
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -104,13 +104,7 @@ class MainActivity : Activity() {
         messageInput = EditText(this).apply {
             gravity = Gravity.END
             minLines = 5
-            setText(
-                "مشترک گرامی،\n" +
-                "شماره اشتراک: {شماره اشتراک}\n" +
-                "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
-                "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
-                "و رسید پرداختی را به این شماره ارسال فرمایید."
-            )
+            setText(defaultMessage())
         }
         content.addView(messageInput)
 
@@ -126,8 +120,8 @@ class MainActivity : Activity() {
             showReport()
         }
 
-        addButton("ذخیره گزارش CSV") {
-            saveCsv()
+        addButton("ذخیره گزارش Excel") {
+            saveExcel()
         }
 
         root.addView(
@@ -141,6 +135,22 @@ class MainActivity : Activity() {
 
         setContentView(root)
     }
+
+    private fun defaultMessage() =
+        "مشترک گرامی،\n" +
+        "شماره اشتراک: {شماره اشتراک}\n" +
+        "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
+        "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
+        "و رسید پرداختی را به این شماره ارسال فرمایید."
+
+    private fun historyKey(s: Subscriber) =
+        "sent_${s.subscription}_${s.phone}"
+
+    private fun recordKey(s: Subscriber) =
+        "record_${s.subscription}_${s.phone}"
+
+    private fun isSent(s: Subscriber) =
+        prefs.getBoolean(historyKey(s), false)
 
     private fun chooseExcel() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -164,73 +174,42 @@ class MainActivity : Activity() {
         when (requestCode) {
             PICK_EXCEL -> {
                 try {
-                    contentResolver.openInputStream(uri).use { input ->
-                        if (input == null) {
-                            toast("فایل قابل خواندن نیست.")
-                            return
-                        }
+                    val input = contentResolver.openInputStream(uri)
+                        ?: throw IllegalArgumentException("فایل قابل خواندن نیست.")
 
-                        val rows = readXlsx(input)
-                        if (rows.isEmpty()) {
-                            toast("هیچ ردیف مشترکی در برگه اول پیدا نشد.")
-                            return
-                        }
+                    val rows = input.use { readXlsx(it) }
 
-                        subscribers.clear()
-                        subscribers.addAll(rows)
-                        currentSubscriber = null
-
-                        statusView.text =
-                            "تعداد مشترکان خوانده‌شده: ${subscribers.size}\n" +
-                            "آماده بررسی فهرست هستید."
-
-                        subscriberView.text =
-                            "برای نمایش اولین مشترک، دکمه نمایش مشترک بعدی را بزنید."
-
-                        toast("فایل اکسل خوانده شد.")
+                    if (rows.isEmpty()) {
+                        toast("ردیف مشترکی در برگه اول پیدا نشد.")
+                        return
                     }
+
+                    subscribers.clear()
+                    subscribers.addAll(rows)
+                    currentSubscriber = null
+
+                    statusView.text =
+                        "تعداد مشترکان خوانده‌شده: ${subscribers.size}\n" +
+                        "تاریخچه ثبت‌شده در حافظه برنامه حفظ می‌شود."
+
+                    subscriberView.text =
+                        "برای شروع، نمایش مشترک بعدی را بزنید."
+
+                    toast("فایل اکسل خوانده شد.")
                 } catch (e: Exception) {
                     toast("خطا در خواندن اکسل: ${e.message}")
                 }
             }
 
-            SAVE_CSV -> {
+            SAVE_EXCEL -> {
                 try {
-                    contentResolver.openOutputStream(uri).use { output ->
-                        if (output == null) {
-                            toast("امکان ذخیره فایل وجود ندارد.")
-                            return
-                        }
-                        output.bufferedWriter(Charsets.UTF_8).use { writer ->
-                            writer.write("\uFEFFشماره اشتراک,شماره همراه,مبلغ بدهی,تأیید ارسال,وضعیت\n")
-                            subscribers.forEach { s ->
-                                val state = when {
-                                    s.approval.equals("بله", true) ->
-                                        "مستثنا از ارسال"
-                                    !s.approval.equals("خیر", true) ->
-                                        "نیازمند بررسی"
-                                    prefs.getBoolean("sent_${s.subscription}", false) ->
-                                        "درخواست ارسال ثبت شده"
-                                    else -> "ارسال نشده"
-                                }
+                    val output = contentResolver.openOutputStream(uri)
+                        ?: throw IllegalArgumentException("امکان ذخیره فایل وجود ندارد.")
 
-                                val fields = listOf(
-                                    s.subscription,
-                                    s.phone,
-                                    s.debt,
-                                    s.approval,
-                                    state
-                                ).map {
-                                    "\"" + it.replace("\"", "\"\"") + "\""
-                                }
-
-                                writer.write(fields.joinToString(",") + "\n")
-                            }
-                        }
-                    }
-                    toast("گزارش CSV ذخیره شد.")
+                    output.use { writeXlsx(it) }
+                    toast("گزارش Excel ذخیره شد.")
                 } catch (e: Exception) {
-                    toast("خطا در ذخیره گزارش: ${e.message}")
+                    toast("خطا در ذخیره اکسل: ${e.message}")
                 }
             }
         }
@@ -262,14 +241,16 @@ class MainActivity : Activity() {
             while (event != XmlPullParser.END_DOCUMENT) {
                 when (event) {
                     XmlPullParser.START_TAG -> {
-                        if (parser.name == "si") {
-                            insideSi = true
-                            text.setLength(0)
-                        } else if (insideSi && parser.name == "t") {
-                            text.append(parser.nextText())
+                        when (parser.name) {
+                            "si" -> {
+                                insideSi = true
+                                text.setLength(0)
+                            }
+                            "t" -> if (insideSi) {
+                                text.append(parser.nextText())
+                            }
                         }
                     }
-
                     XmlPullParser.END_TAG -> {
                         if (parser.name == "si") {
                             strings.add(text.toString())
@@ -282,9 +263,7 @@ class MainActivity : Activity() {
         }
 
         val sheetBytes = entries["xl/worksheets/sheet1.xml"]
-            ?: throw IllegalArgumentException(
-                "برگه اول فایل اکسل پیدا نشد."
-            )
+            ?: throw IllegalArgumentException("برگه اول اکسل پیدا نشد.")
 
         val parser = Xml.newPullParser()
         parser.setInput(sheetBytes.inputStream(), "UTF-8")
@@ -302,28 +281,20 @@ class MainActivity : Activity() {
                 XmlPullParser.START_TAG -> {
                     when (parser.name) {
                         "row" -> row = mutableMapOf()
-
                         "c" -> {
                             cellRef = parser.getAttributeValue(null, "r") ?: ""
                             cellType = parser.getAttributeValue(null, "t") ?: ""
                             cellValue = ""
                             insideCell = true
                         }
-
-                        "v" -> {
-                            if (insideCell) {
-                                cellValue = parser.nextText()
-                            }
+                        "v" -> if (insideCell) {
+                            cellValue = parser.nextText()
                         }
-
-                        "t" -> {
-                            if (insideCell && cellType == "inlineStr") {
-                                cellValue += parser.nextText()
-                            }
+                        "t" -> if (insideCell && cellType == "inlineStr") {
+                            cellValue += parser.nextText()
                         }
                     }
                 }
-
                 XmlPullParser.END_TAG -> {
                     when (parser.name) {
                         "c" -> {
@@ -333,7 +304,7 @@ class MainActivity : Activity() {
                                 column = column * 26 +
                                     (ch.uppercaseChar() - 'A' + 1)
                             }
-                            column -= 1
+                            column--
 
                             val value = if (cellType == "s") {
                                 strings.getOrNull(
@@ -346,12 +317,9 @@ class MainActivity : Activity() {
                             if (column >= 0) row[column] = value
                             insideCell = false
                         }
-
                         "row" -> {
                             val maxColumn = row.keys.maxOrNull() ?: -1
-                            result.add(
-                                (0..maxColumn).map { row[it] ?: "" }
-                            )
+                            result.add((0..maxColumn).map { row[it] ?: "" })
                         }
                     }
                 }
@@ -359,7 +327,6 @@ class MainActivity : Activity() {
             event = parser.next()
         }
 
-        // ردیف اول، عنوان ستون‌ها است.
         return result.drop(1).mapNotNull { cells ->
             val subscription = cells.getOrElse(0) { "" }.trim()
             val phone = cells.getOrElse(1) { "" }.trim()
@@ -367,25 +334,17 @@ class MainActivity : Activity() {
                 .trim().replace(",", "").replace("٬", "")
             val approval = cells.getOrElse(3) { "" }.trim()
 
-            if (subscription.isBlank()) {
-                null
-            } else {
-                Subscriber(subscription, phone, debt, approval)
-            }
+            if (subscription.isBlank()) null
+            else Subscriber(subscription, phone, debt, approval)
         }
     }
 
-    private fun isEligible(s: Subscriber): Boolean {
-        return s.approval.equals("خیر", true) &&
-            !prefs.getBoolean("sent_${s.subscription}", false)
-    }
+    private fun isEligible(s: Subscriber): Boolean =
+        s.approval.equals("خیر", true) && !isSent(s)
 
     private fun showNextSubscriber() {
-        val currentIndex = if (currentSubscriber == null) {
-            -1
-        } else {
-            subscribers.indexOf(currentSubscriber)
-        }
+        val currentIndex = if (currentSubscriber == null) -1
+        else subscribers.indexOf(currentSubscriber)
 
         val next = subscribers.indices
             .drop(currentIndex + 1)
@@ -395,7 +354,7 @@ class MainActivity : Activity() {
             currentSubscriber = null
             subscriberView.text =
                 "مشترک واجد شرایط دیگری برای نمایش وجود ندارد.\n" +
-                "موارد خالی یا نامشخص را از گزارش بررسی کنید."
+                "موارد خالی یا نامشخص را در گزارش بررسی کنید."
             return
         }
 
@@ -409,14 +368,7 @@ class MainActivity : Activity() {
             "تأیید ارسال در اکسل: ${s.approval}\n" +
             "وضعیت: آماده بررسی"
 
-        val template =
-            "مشترک گرامی،\n" +
-            "شماره اشتراک: {شماره اشتراک}\n" +
-            "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
-            "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
-            "و رسید پرداختی را به این شماره ارسال فرمایید."
-
-        messageInput.setText(template)
+        messageInput.setText(defaultMessage())
     }
 
     private fun prepareMessage() {
@@ -426,8 +378,8 @@ class MainActivity : Activity() {
             return
         }
 
-        if (!s.approval.equals("خیر", true)) {
-            toast("این مشترک تأیید ارسال «خیر» ندارد.")
+        if (!s.approval.equals("خیر", true) || isSent(s)) {
+            toast("این مشترک واجد شرایط ارسال نیست.")
             return
         }
 
@@ -491,7 +443,7 @@ class MainActivity : Activity() {
                 arrayOf(Manifest.permission.SEND_SMS),
                 SMS_PERMISSION
             )
-            toast("مجوز پیامک را تأیید کنید و دوباره ارسال را بزنید.")
+            toast("مجوز پیامک را تأیید کنید و سپس دوباره ارسال را بزنید.")
             return
         }
 
@@ -506,9 +458,7 @@ class MainActivity : Activity() {
                     s.phone, null, parts, null, null
                 )
             } else {
-                manager.sendTextMessage(
-                    s.phone, null, message, null, null
-                )
+                manager.sendTextMessage(s.phone, null, message, null, null)
             }
 
             val record =
@@ -518,13 +468,13 @@ class MainActivity : Activity() {
                 "وضعیت: درخواست ارسال ثبت شد؛ تحویل تأیید نشده است."
 
             prefs.edit()
-                .putBoolean("sent_${s.subscription}", true)
-                .putString("record_${s.subscription}", record)
+                .putBoolean(historyKey(s), true)
+                .putString(recordKey(s), record)
                 .apply()
 
             statusView.text =
                 "درخواست ارسال برای اشتراک ${s.subscription} ثبت شد.\n" +
-                "تحویل پیامک هنوز تأیید نشده است."
+                "تحویل پیامک تأیید نشده است."
 
             toast("درخواست ارسال ثبت شد.")
         } catch (e: Exception) {
@@ -537,9 +487,7 @@ class MainActivity : Activity() {
         permissions: Array<out String>,
         grantResults: IntArray
     ) {
-        super.onRequestPermissionsResult(
-            requestCode, permissions, grantResults
-        )
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
         if (requestCode == SMS_PERMISSION) {
             if (grantResults.isNotEmpty() &&
@@ -553,9 +501,6 @@ class MainActivity : Activity() {
     }
 
     private fun showReport() {
-        val sent = subscribers.count {
-            prefs.getBoolean("sent_${it.subscription}", false)
-        }
         val excluded = subscribers.count {
             it.approval.equals("بله", true)
         }
@@ -563,16 +508,16 @@ class MainActivity : Activity() {
             !it.approval.equals("بله", true) &&
                 !it.approval.equals("خیر", true)
         }
-        val waiting = subscribers.count {
-            isEligible(it)
-        }
+        val waiting = subscribers.count { isEligible(it) }
+        val sent = subscribers.count { isSent(it) }
 
         val history = prefs.all
             .filterKeys { it.startsWith("record_") }
             .values.filterIsInstance<String>()
+            .sorted()
 
         val report =
-            "تعداد رکوردها: ${subscribers.size}\n" +
+            "تعداد رکوردهای فایل فعلی: ${subscribers.size}\n" +
             "تأیید بله، مستثنا: $excluded\n" +
             "نیازمند بررسی: $needsReview\n" +
             "آماده ارسال: $waiting\n" +
@@ -588,20 +533,133 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun saveCsv() {
+    private fun saveExcel() {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "text/csv"
-            putExtra(Intent.EXTRA_TITLE, "vosool_report.csv")
+            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            putExtra(Intent.EXTRA_TITLE, "vosool_report.xlsx")
         }
-        startActivityForResult(intent, SAVE_CSV)
+        startActivityForResult(intent, SAVE_EXCEL)
+    }
+
+    private fun xmlEscape(value: String): String =
+        value.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&apos;")
+
+    private fun columnName(index: Int): String {
+        var n = index + 1
+        var result = ""
+        while (n > 0) {
+            val r = (n - 1) % 26
+            result = ('A'.code + r).toChar() + result
+            n = (n - 1) / 26
+        }
+        return result
+    }
+
+    private fun writeXlsx(output: OutputStream) {
+        val rows = mutableListOf(
+            listOf(
+                "شماره اشتراک",
+                "شماره همراه",
+                "مبلغ بدهی به ریال",
+                "تأیید ارسال پیامک",
+                "وضعیت"
+            )
+        )
+
+        subscribers.forEach { s ->
+            val state = when {
+                s.approval.equals("بله", true) -> "مستثنا از ارسال"
+                !s.approval.equals("خیر", true) -> "نیازمند بررسی"
+                isSent(s) -> "درخواست ارسال ثبت شده؛ تحویل تأیید نشده"
+                else -> "ارسال نشده"
+            }
+
+            rows.add(
+                listOf(s.subscription, s.phone, s.debt, s.approval, state)
+            )
+        }
+
+        val historyStart = rows.size + 2
+        rows.add(listOf("سابقه درخواست‌های ارسال"))
+        prefs.all
+            .filterKeys { it.startsWith("record_") }
+            .values.filterIsInstance<String>()
+            .sorted()
+            .forEach { record ->
+                rows.add(listOf(record.replace("\n", " | ")))
+            }
+
+        ZipOutputStream(output).use { zip ->
+            fun entry(name: String, content: String) {
+                zip.putNextEntry(java.util.zip.ZipEntry(name))
+                zip.write(content.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+
+            entry(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"""
+            )
+
+            entry(
+                "_rels/.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+            )
+
+            entry(
+                "xl/workbook.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="گزارش مطالبات" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"""
+            )
+
+            entry(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"""
+            )
+
+            val sheet = StringBuilder()
+            sheet.append(
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>"""
+            )
+
+            rows.forEachIndexed { rowIndex, cells ->
+                val excelRow = rowIndex + 1
+                sheet.append("""<row r="$excelRow">""")
+                cells.forEachIndexed { colIndex, value ->
+                    val ref = columnName(colIndex) + excelRow
+                    sheet.append(
+                        """<c r="$ref" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>"""
+                    )
+                }
+                sheet.append("</row>")
+            }
+
+            sheet.append("</sheetData></worksheet>")
+            entry("xl/worksheets/sheet1.xml", sheet.toString())
+        }
     }
 
     private fun toast(message: String) {
-        Toast.makeText(
-            this,
-            message,
-            Toast.LENGTH_LONG
-        ).show()
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 }
