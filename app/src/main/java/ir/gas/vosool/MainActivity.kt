@@ -136,12 +136,14 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    private fun defaultMessage() =
-        "مشترک گرامی،\n" +
-        "شماره اشتراک: {شماره اشتراک}\n" +
-        "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
-        "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
-        "و رسید پرداختی را به این شماره ارسال فرمایید."
+private fun defaultMessage() =
+    "مشترک گرامی،\n\n" +
+    "شماره اشتراک: {شماره اشتراک}\n" +
+    "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
+    "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
+    "و رسید پرداختی را به این شماره ارسال فرمایید.\n\n" +
+    "لینک سابقه قبوض:\n" +
+    "https://portal.nigc-khgc.ir/index.php/site/loginmoshtarak"
 
     private fun historyKey(s: Subscriber) =
         "sent_${s.subscription}_${s.phone}"
