@@ -17,6 +17,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.InputStream
 import java.io.OutputStream
@@ -88,7 +90,7 @@ class MainActivity : Activity() {
 
         addText("وصول مطالبات گاز قادر خرمشهر", 23f)
 
-        statusView = addText("ابتدا فایل اکسل مشترکان را انتخاب کنید.")
+        statusView = addText("در حال بارگذاری اطلاعات...")
         subscriberView = addText("مشترکی انتخاب نشده است.")
 
         addButton("انتخاب فایل اکسل") {
@@ -134,16 +136,19 @@ class MainActivity : Activity() {
         )
 
         setContentView(root)
+
+        // بازیابی خودکار اطلاعات قبلی
+        loadSavedSubscribers()
     }
 
-private fun defaultMessage() =
-    "مشترک گرامی،\n\n" +
-    "شماره اشتراک: {شماره اشتراک}\n" +
-    "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
-    "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
-    "و رسید پرداختی را به این شماره ارسال فرمایید.\n\n" +
-    "لینک سابقه قبوض:\n" +
-    "https://portal.nigc-khgc.ir/index.php/site/loginmoshtarak"
+    private fun defaultMessage() =
+        "مشترک گرامی،\n\n" +
+        "شماره اشتراک: {شماره اشتراک}\n" +
+        "مبلغ بدهی گاز شما {مبلغ بدهی} ریال است. " +
+        "لطفاً جهت پرداخت ظرف 48 ساعت آینده اقدام فرمایید " +
+        "و رسید پرداختی را به این شماره ارسال فرمایید.\n\n" +
+        "لینک سابقه قبوض:\n" +
+        "https://portal.nigc-khgc.ir/index.php/site/loginmoshtarak"
 
     private fun historyKey(s: Subscriber) =
         "sent_${s.subscription}_${s.phone}"
@@ -154,11 +159,80 @@ private fun defaultMessage() =
     private fun isSent(s: Subscriber) =
         prefs.getBoolean(historyKey(s), false)
 
+    // ذخیره اطلاعات مشترکان در حافظه داخلی برنامه
+    private fun saveSubscribers() {
+        try {
+            val array = JSONArray()
+
+            subscribers.forEach { s ->
+                val item = JSONObject()
+                item.put("subscription", s.subscription)
+                item.put("phone", s.phone)
+                item.put("debt", s.debt)
+                item.put("approval", s.approval)
+                array.put(item)
+            }
+
+            prefs.edit()
+                .putString("subscribers_json", array.toString())
+                .apply()
+
+        } catch (e: Exception) {
+            toast("خطا در ذخیره اطلاعات: ${e.message}")
+        }
+    }
+
+    // بازیابی خودکار اطلاعات در شروع برنامه
+    private fun loadSavedSubscribers() {
+        try {
+            val saved = prefs.getString("subscribers_json", null)
+
+            if (saved.isNullOrBlank()) {
+                statusView.text =
+                    "ابتدا فایل اکسل مشترکان را انتخاب کنید."
+                subscriberView.text = "مشترکی انتخاب نشده است."
+                return
+            }
+
+            val array = JSONArray(saved)
+            subscribers.clear()
+
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+
+                subscribers.add(
+                    Subscriber(
+                        subscription = item.optString("subscription"),
+                        phone = item.optString("phone"),
+                        debt = item.optString("debt"),
+                        approval = item.optString("approval")
+                    )
+                )
+            }
+
+            currentSubscriber = null
+
+            statusView.text =
+                "اطلاعات ذخیره‌شده بازیابی شد.\n" +
+                "تعداد مشترکان: ${subscribers.size}"
+
+            subscriberView.text =
+                "برای شروع، نمایش مشترک بعدی را بزنید."
+
+        } catch (e: Exception) {
+            statusView.text =
+                "بازیابی اطلاعات ناموفق بود. فایل اکسل را دوباره انتخاب کنید."
+            toast("خطا در بازیابی اطلاعات: ${e.message}")
+        }
+    }
+
     private fun chooseExcel() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            type =
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         }
+
         startActivityForResult(intent, PICK_EXCEL)
     }
 
@@ -177,7 +251,9 @@ private fun defaultMessage() =
             PICK_EXCEL -> {
                 try {
                     val input = contentResolver.openInputStream(uri)
-                        ?: throw IllegalArgumentException("فایل قابل خواندن نیست.")
+                        ?: throw IllegalArgumentException(
+                            "فایل قابل خواندن نیست."
+                        )
 
                     val rows = input.use { readXlsx(it) }
 
@@ -190,14 +266,18 @@ private fun defaultMessage() =
                     subscribers.addAll(rows)
                     currentSubscriber = null
 
+                    // ذخیره خودکار بعد از وارد کردن اکسل
+                    saveSubscribers()
+
                     statusView.text =
                         "تعداد مشترکان خوانده‌شده: ${subscribers.size}\n" +
-                        "تاریخچه ثبت‌شده در حافظه برنامه حفظ می‌شود."
+                        "اطلاعات در حافظه برنامه ذخیره شد."
 
                     subscriberView.text =
                         "برای شروع، نمایش مشترک بعدی را بزنید."
 
-                    toast("فایل اکسل خوانده شد.")
+                    toast("اکسل خوانده و اطلاعات ذخیره شد.")
+
                 } catch (e: Exception) {
                     toast("خطا در خواندن اکسل: ${e.message}")
                 }
@@ -206,10 +286,13 @@ private fun defaultMessage() =
             SAVE_EXCEL -> {
                 try {
                     val output = contentResolver.openOutputStream(uri)
-                        ?: throw IllegalArgumentException("امکان ذخیره فایل وجود ندارد.")
+                        ?: throw IllegalArgumentException(
+                            "امکان ذخیره فایل وجود ندارد."
+                        )
 
                     output.use { writeXlsx(it) }
                     toast("گزارش Excel ذخیره شد.")
+
                 } catch (e: Exception) {
                     toast("خطا در ذخیره اکسل: ${e.message}")
                 }
@@ -223,9 +306,11 @@ private fun defaultMessage() =
         ZipInputStream(input).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
+
                 if (!entry.isDirectory) {
                     entries[entry.name] = zip.readBytes()
                 }
+
                 zip.closeEntry()
             }
         }
@@ -248,11 +333,13 @@ private fun defaultMessage() =
                                 insideSi = true
                                 text.setLength(0)
                             }
+
                             "t" -> if (insideSi) {
                                 text.append(parser.nextText())
                             }
                         }
                     }
+
                     XmlPullParser.END_TAG -> {
                         if (parser.name == "si") {
                             strings.add(text.toString())
@@ -260,12 +347,15 @@ private fun defaultMessage() =
                         }
                     }
                 }
+
                 event = parser.next()
             }
         }
 
         val sheetBytes = entries["xl/worksheets/sheet1.xml"]
-            ?: throw IllegalArgumentException("برگه اول اکسل پیدا نشد.")
+            ?: throw IllegalArgumentException(
+                "برگه اول اکسل پیدا نشد."
+            )
 
         val parser = Xml.newPullParser()
         parser.setInput(sheetBytes.inputStream(), "UTF-8")
@@ -283,29 +373,41 @@ private fun defaultMessage() =
                 XmlPullParser.START_TAG -> {
                     when (parser.name) {
                         "row" -> row = mutableMapOf()
+
                         "c" -> {
-                            cellRef = parser.getAttributeValue(null, "r") ?: ""
-                            cellType = parser.getAttributeValue(null, "t") ?: ""
+                            cellRef =
+                                parser.getAttributeValue(null, "r") ?: ""
+                            cellType =
+                                parser.getAttributeValue(null, "t") ?: ""
                             cellValue = ""
                             insideCell = true
                         }
+
                         "v" -> if (insideCell) {
                             cellValue = parser.nextText()
                         }
-                        "t" -> if (insideCell && cellType == "inlineStr") {
+
+                        "t" -> if (
+                            insideCell && cellType == "inlineStr"
+                        ) {
                             cellValue += parser.nextText()
                         }
                     }
                 }
+
                 XmlPullParser.END_TAG -> {
                     when (parser.name) {
                         "c" -> {
-                            val letters = cellRef.takeWhile { it.isLetter() }
+                            val letters =
+                                cellRef.takeWhile { it.isLetter() }
+
                             var column = 0
+
                             letters.forEach { ch ->
                                 column = column * 26 +
                                     (ch.uppercaseChar() - 'A' + 1)
                             }
+
                             column--
 
                             val value = if (cellType == "s") {
@@ -316,28 +418,53 @@ private fun defaultMessage() =
                                 cellValue
                             }
 
-                            if (column >= 0) row[column] = value
+                            if (column >= 0) {
+                                row[column] = value
+                            }
+
                             insideCell = false
                         }
+
                         "row" -> {
                             val maxColumn = row.keys.maxOrNull() ?: -1
-                            result.add((0..maxColumn).map { row[it] ?: "" })
+
+                            result.add(
+                                (0..maxColumn).map { row[it] ?: "" }
+                            )
                         }
                     }
                 }
             }
+
             event = parser.next()
         }
 
         return result.drop(1).mapNotNull { cells ->
-            val subscription = cells.getOrElse(0) { "" }.trim()
-            val phone = cells.getOrElse(1) { "" }.trim()
-            val debt = cells.getOrElse(2) { "" }
-                .trim().replace(",", "").replace("٬", "")
-            val approval = cells.getOrElse(3) { "" }.trim()
+            val subscription =
+                cells.getOrElse(0) { "" }.trim()
 
-            if (subscription.isBlank()) null
-            else Subscriber(subscription, phone, debt, approval)
+            val phone =
+                cells.getOrElse(1) { "" }.trim()
+
+            val debt =
+                cells.getOrElse(2) { "" }
+                    .trim()
+                    .replace(",", "")
+                    .replace("٬", "")
+
+            val approval =
+                cells.getOrElse(3) { "" }.trim()
+
+            if (subscription.isBlank()) {
+                null
+            } else {
+                Subscriber(
+                    subscription,
+                    phone,
+                    debt,
+                    approval
+                )
+            }
         }
     }
 
@@ -345,8 +472,11 @@ private fun defaultMessage() =
         s.approval.equals("خیر", true) && !isSent(s)
 
     private fun showNextSubscriber() {
-        val currentIndex = if (currentSubscriber == null) -1
-        else subscribers.indexOf(currentSubscriber)
+        val currentIndex = if (currentSubscriber == null) {
+            -1
+        } else {
+            subscribers.indexOf(currentSubscriber)
+        }
 
         val next = subscribers.indices
             .drop(currentIndex + 1)
@@ -354,9 +484,11 @@ private fun defaultMessage() =
 
         if (next == null) {
             currentSubscriber = null
+
             subscriberView.text =
                 "مشترک واجد شرایط دیگری برای نمایش وجود ندارد.\n" +
                 "موارد خالی یا نامشخص را در گزارش بررسی کنید."
+
             return
         }
 
@@ -375,6 +507,7 @@ private fun defaultMessage() =
 
     private fun prepareMessage() {
         val s = currentSubscriber
+
         if (s == null) {
             toast("ابتدا یک مشترک را نمایش دهید.")
             return
@@ -405,18 +538,23 @@ private fun defaultMessage() =
 
     private fun confirmSend() {
         val s = currentSubscriber
+
         if (s == null) {
             toast("ابتدا یک مشترک را انتخاب کنید.")
             return
         }
 
         if (!isEligible(s)) {
-            toast("این مشترک واجد شرایط ارسال نیست یا قبلاً ثبت شده است.")
+            toast(
+                "این مشترک واجد شرایط ارسال نیست یا قبلاً ثبت شده است."
+            )
             return
         }
 
         val message = messageInput.text.toString()
-        if (message.contains("{شماره اشتراک}") ||
+
+        if (
+            message.contains("{شماره اشتراک}") ||
             message.contains("{مبلغ بدهی}")
         ) {
             toast("ابتدا پیامک را آماده کنید.")
@@ -427,7 +565,8 @@ private fun defaultMessage() =
             .setTitle("تأیید نهایی ارسال")
             .setMessage(
                 "شماره اشتراک: ${s.subscription}\n" +
-                "شماره همراه: ${s.phone}\n\n$message\n\n" +
+                "شماره همراه: ${s.phone}\n\n" +
+                "$message\n\n" +
                 "ارسال این پیامک را تأیید می‌کنید؟"
             )
             .setNegativeButton("انصراف", null)
@@ -438,14 +577,18 @@ private fun defaultMessage() =
     }
 
     private fun sendSms(s: Subscriber, message: String) {
-        if (checkSelfPermission(Manifest.permission.SEND_SMS) !=
+        if (
+            checkSelfPermission(Manifest.permission.SEND_SMS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(
                 arrayOf(Manifest.permission.SEND_SMS),
                 SMS_PERMISSION
             )
-            toast("مجوز پیامک را تأیید کنید و سپس دوباره ارسال را بزنید.")
+
+            toast(
+                "مجوز پیامک را تأیید کنید و سپس دوباره ارسال را بزنید."
+            )
             return
         }
 
@@ -460,7 +603,9 @@ private fun defaultMessage() =
                     s.phone, null, parts, null, null
                 )
             } else {
-                manager.sendTextMessage(s.phone, null, message, null, null)
+                manager.sendTextMessage(
+                    s.phone, null, message, null, null
+                )
             }
 
             val record =
@@ -474,11 +619,15 @@ private fun defaultMessage() =
                 .putString(recordKey(s), record)
                 .apply()
 
+            // سابقه پیامک نیز در حافظه داخلی باقی می‌ماند
+            saveSubscribers()
+
             statusView.text =
                 "درخواست ارسال برای اشتراک ${s.subscription} ثبت شد.\n" +
                 "تحویل پیامک تأیید نشده است."
 
             toast("درخواست ارسال ثبت شد.")
+
         } catch (e: Exception) {
             toast("خطا در ارسال: ${e.message ?: "نامشخص"}")
         }
@@ -489,10 +638,15 @@ private fun defaultMessage() =
         permissions: Array<out String>,
         grantResults: IntArray
     ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        super.onRequestPermissionsResult(
+            requestCode,
+            permissions,
+            grantResults
+        )
 
         if (requestCode == SMS_PERMISSION) {
-            if (grantResults.isNotEmpty() &&
+            if (
+                grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             ) {
                 toast("مجوز داده شد. دوباره ارسال را تأیید کنید.")
@@ -506,16 +660,24 @@ private fun defaultMessage() =
         val excluded = subscribers.count {
             it.approval.equals("بله", true)
         }
+
         val needsReview = subscribers.count {
             !it.approval.equals("بله", true) &&
                 !it.approval.equals("خیر", true)
         }
-        val waiting = subscribers.count { isEligible(it) }
-        val sent = subscribers.count { isSent(it) }
+
+        val waiting = subscribers.count {
+            isEligible(it)
+        }
+
+        val sent = subscribers.count {
+            isSent(it)
+        }
 
         val history = prefs.all
             .filterKeys { it.startsWith("record_") }
-            .values.filterIsInstance<String>()
+            .values
+            .filterIsInstance<String>()
             .sorted()
 
         val report =
@@ -523,7 +685,7 @@ private fun defaultMessage() =
             "تأیید بله، مستثنا: $excluded\n" +
             "نیازمند بررسی: $needsReview\n" +
             "آماده ارسال: $waiting\n" +
-            "درخواست‌های ثبت‌شده در فایل فعلی: $sent\n\n" +
+            "درخواست‌های ثبت‌شده: $sent\n\n" +
             history.joinToString("\n\n").ifBlank {
                 "سابقه‌ای ثبت نشده است."
             }
@@ -538,9 +700,11 @@ private fun defaultMessage() =
     private fun saveExcel() {
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            type =
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             putExtra(Intent.EXTRA_TITLE, "vosool_report.xlsx")
         }
+
         startActivityForResult(intent, SAVE_EXCEL)
     }
 
@@ -554,11 +718,13 @@ private fun defaultMessage() =
     private fun columnName(index: Int): String {
         var n = index + 1
         var result = ""
+
         while (n > 0) {
             val r = (n - 1) % 26
             result = ('A'.code + r).toChar() + result
             n = (n - 1) / 26
         }
+
         return result
     }
 
@@ -575,28 +741,43 @@ private fun defaultMessage() =
 
         subscribers.forEach { s ->
             val state = when {
-                s.approval.equals("بله", true) -> "مستثنا از ارسال"
-                !s.approval.equals("خیر", true) -> "نیازمند بررسی"
-                isSent(s) -> "درخواست ارسال ثبت شده؛ تحویل تأیید نشده"
-                else -> "ارسال نشده"
+                s.approval.equals("بله", true) ->
+                    "مستثنا از ارسال"
+
+                !s.approval.equals("خیر", true) ->
+                    "نیازمند بررسی"
+
+                isSent(s) ->
+                    "درخواست ارسال ثبت شده؛ تحویل تأیید نشده"
+
+                else ->
+                    "ارسال نشده"
             }
 
             rows.add(
-                listOf(s.subscription, s.phone, s.debt, s.approval, state)
+                listOf(
+                    s.subscription,
+                    s.phone,
+                    s.debt,
+                    s.approval,
+                    state
+                )
             )
         }
 
-        val historyStart = rows.size + 2
         rows.add(listOf("سابقه درخواست‌های ارسال"))
+
         prefs.all
             .filterKeys { it.startsWith("record_") }
-            .values.filterIsInstance<String>()
+            .values
+            .filterIsInstance<String>()
             .sorted()
             .forEach { record ->
                 rows.add(listOf(record.replace("\n", " | ")))
             }
 
         ZipOutputStream(output).use { zip ->
+
             fun entry(name: String, content: String) {
                 zip.putNextEntry(java.util.zip.ZipEntry(name))
                 zip.write(content.toByteArray(Charsets.UTF_8))
@@ -639,6 +820,7 @@ private fun defaultMessage() =
             )
 
             val sheet = StringBuilder()
+
             sheet.append(
                 """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>"""
@@ -646,22 +828,34 @@ private fun defaultMessage() =
 
             rows.forEachIndexed { rowIndex, cells ->
                 val excelRow = rowIndex + 1
+
                 sheet.append("""<row r="$excelRow">""")
+
                 cells.forEachIndexed { colIndex, value ->
                     val ref = columnName(colIndex) + excelRow
+
                     sheet.append(
                         """<c r="$ref" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>"""
                     )
                 }
+
                 sheet.append("</row>")
             }
 
             sheet.append("</sheetData></worksheet>")
-            entry("xl/worksheets/sheet1.xml", sheet.toString())
+
+            entry(
+                "xl/worksheets/sheet1.xml",
+                sheet.toString()
+            )
         }
     }
 
     private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
