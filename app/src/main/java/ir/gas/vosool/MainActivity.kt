@@ -137,7 +137,6 @@ class MainActivity : Activity() {
 
         setContentView(root)
 
-        // بازیابی خودکار اطلاعات قبلی
         loadSavedSubscribers()
     }
 
@@ -159,7 +158,6 @@ class MainActivity : Activity() {
     private fun isSent(s: Subscriber) =
         prefs.getBoolean(historyKey(s), false)
 
-    // ذخیره اطلاعات مشترکان در حافظه داخلی برنامه
     private fun saveSubscribers() {
         try {
             val array = JSONArray()
@@ -182,7 +180,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // بازیابی خودکار اطلاعات در شروع برنامه
     private fun loadSavedSubscribers() {
         try {
             val saved = prefs.getString("subscribers_json", null)
@@ -266,7 +263,6 @@ class MainActivity : Activity() {
                     subscribers.addAll(rows)
                     currentSubscriber = null
 
-                    // ذخیره خودکار بعد از وارد کردن اکسل
                     saveSubscribers()
 
                     statusView.text =
@@ -468,8 +464,10 @@ class MainActivity : Activity() {
         }
     }
 
+    // اصلاح اصلی:
+    // «بله» مستثنا است؛ مقدار خالی و «خیر» قابل بررسی هستند.
     private fun isEligible(s: Subscriber): Boolean =
-        s.approval.equals("خیر", true) && !isSent(s)
+        !s.approval.equals("بله", true) && !isSent(s)
 
     private fun showNextSubscriber() {
         val currentIndex = if (currentSubscriber == null) {
@@ -487,7 +485,7 @@ class MainActivity : Activity() {
 
             subscriberView.text =
                 "مشترک واجد شرایط دیگری برای نمایش وجود ندارد.\n" +
-                "موارد خالی یا نامشخص را در گزارش بررسی کنید."
+                "گزارش وضعیت را بررسی کنید."
 
             return
         }
@@ -499,7 +497,8 @@ class MainActivity : Activity() {
             "شماره اشتراک: ${s.subscription}\n" +
             "شماره همراه: ${s.phone}\n" +
             "مبلغ بدهی: ${s.debt} ریال\n" +
-            "تأیید ارسال در اکسل: ${s.approval}\n" +
+            "تأیید ارسال در اکسل: " +
+            "${s.approval.ifBlank { "خالی؛ نیازمند بررسی" }}\n" +
             "وضعیت: آماده بررسی"
 
         messageInput.setText(defaultMessage())
@@ -513,7 +512,8 @@ class MainActivity : Activity() {
             return
         }
 
-        if (!s.approval.equals("خیر", true) || isSent(s)) {
+        // مقدار خالی و «خیر» مجاز؛ «بله» و ارسال‌شده غیرمجاز.
+        if (s.approval.equals("بله", true) || isSent(s)) {
             toast("این مشترک واجد شرایط ارسال نیست.")
             return
         }
@@ -619,7 +619,6 @@ class MainActivity : Activity() {
                 .putString(recordKey(s), record)
                 .apply()
 
-            // سابقه پیامک نیز در حافظه داخلی باقی می‌ماند
             saveSubscribers()
 
             statusView.text =
@@ -662,8 +661,13 @@ class MainActivity : Activity() {
         }
 
         val needsReview = subscribers.count {
-            !it.approval.equals("بله", true) &&
+            it.approval.isNotBlank() &&
+                !it.approval.equals("بله", true) &&
                 !it.approval.equals("خیر", true)
+        }
+
+        val blankApproval = subscribers.count {
+            it.approval.isBlank()
         }
 
         val waiting = subscribers.count {
@@ -683,8 +687,9 @@ class MainActivity : Activity() {
         val report =
             "تعداد رکوردهای فایل فعلی: ${subscribers.size}\n" +
             "تأیید بله، مستثنا: $excluded\n" +
-            "نیازمند بررسی: $needsReview\n" +
-            "آماده ارسال: $waiting\n" +
+            "ستون تأیید خالی: $blankApproval\n" +
+            "مقدار تأیید نامشخص: $needsReview\n" +
+            "واجد شرایط از نظر فیلتر برنامه: $waiting\n" +
             "درخواست‌های ثبت‌شده: $sent\n\n" +
             history.joinToString("\n\n").ifBlank {
                 "سابقه‌ای ثبت نشده است."
@@ -744,11 +749,14 @@ class MainActivity : Activity() {
                 s.approval.equals("بله", true) ->
                     "مستثنا از ارسال"
 
-                !s.approval.equals("خیر", true) ->
-                    "نیازمند بررسی"
-
                 isSent(s) ->
                     "درخواست ارسال ثبت شده؛ تحویل تأیید نشده"
+
+                s.approval.isBlank() ->
+                    "ستون تأیید خالی؛ قابل بررسی"
+
+                !s.approval.equals("خیر", true) ->
+                    "مقدار تأیید نامشخص"
 
                 else ->
                     "ارسال نشده"
