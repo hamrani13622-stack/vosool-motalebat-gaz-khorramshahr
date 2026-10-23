@@ -5,6 +5,7 @@
 
     <application
         android:allowBackup="true"
+        android:icon="@drawable/ic_torch"
         android:label="وصول مطالبات گاز قادر خرمشهر"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
