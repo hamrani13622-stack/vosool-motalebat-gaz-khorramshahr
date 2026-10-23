@@ -49,7 +49,7 @@ class ActivationActivity : Activity() {
             hint = "کد فعال‌سازی"
             textSize = 18f
             gravity = Gravity.CENTER
-            singleLine = true
+            setSingleLine(true)
         }
 
         val activateButton = Button(this).apply {
