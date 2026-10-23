@@ -54,6 +54,15 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // کنترل فعال‌سازی قبل از نمایش برنامه اصلی
+        if (!ActivationManager.isActivated(this)) {
+            startActivity(
+                Intent(this, ActivationActivity::class.java)
+            )
+            finish()
+            return
+        }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(22, 20, 22, 20)
@@ -464,8 +473,7 @@ class MainActivity : Activity() {
         }
     }
 
-    // اصلاح اصلی:
-    // «بله» مستثنا است؛ مقدار خالی و «خیر» قابل بررسی هستند.
+    // مقدار «بله» مستثنا است؛ مقدار خالی و «خیر» قابل بررسی هستند.
     private fun isEligible(s: Subscriber): Boolean =
         !s.approval.equals("بله", true) && !isSent(s)
 
@@ -512,7 +520,6 @@ class MainActivity : Activity() {
             return
         }
 
-        // مقدار خالی و «خیر» مجاز؛ «بله» و ارسال‌شده غیرمجاز.
         if (s.approval.equals("بله", true) || isSent(s)) {
             toast("این مشترک واجد شرایط ارسال نیست.")
             return
