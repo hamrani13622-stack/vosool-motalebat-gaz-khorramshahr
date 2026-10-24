@@ -1,4 +1,3 @@
-
 package ir.gas.vosool
 
 import android.Manifest
@@ -8,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.telephony.SmsManager
+import android.text.InputType
 import android.util.Xml
 import android.view.Gravity
 import android.view.ViewGroup
@@ -54,11 +54,8 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // کنترل فعال‌سازی قبل از نمایش برنامه اصلی
         if (!ActivationManager.isActivated(this)) {
-            startActivity(
-                Intent(this, ActivationActivity::class.java)
-            )
+            startActivity(Intent(this, ActivationActivity::class.java))
             finish()
             return
         }
@@ -106,6 +103,10 @@ class MainActivity : Activity() {
             chooseExcel()
         }
 
+        addButton("جست‌وجو بر اساس اشتراک یا شماره تماس") {
+            searchSubscriber()
+        }
+
         addButton("نمایش مشترک بعدی") {
             showNextSubscriber()
         }
@@ -145,7 +146,6 @@ class MainActivity : Activity() {
         )
 
         setContentView(root)
-
         loadSavedSubscribers()
     }
 
@@ -230,6 +230,127 @@ class MainActivity : Activity() {
                 "بازیابی اطلاعات ناموفق بود. فایل اکسل را دوباره انتخاب کنید."
             toast("خطا در بازیابی اطلاعات: ${e.message}")
         }
+    }
+
+    // تبدیل ارقام فارسی و عربی به انگلیسی برای جست‌وجو
+    private fun normalizeSearchNumber(value: String): String {
+        return value.trim().map { ch ->
+            when (ch) {
+                in '۰'..'۹' -> '0' + (ch - '۰')
+                in '٠'..'٩' -> '0' + (ch - '٠')
+                else -> ch
+            }
+        }.joinToString("").filter { !it.isWhitespace() }
+    }
+
+    // جست‌وجو در شماره اشتراک و شماره موبایل
+    private fun searchSubscriber() {
+        val input = EditText(this).apply {
+            hint = "شماره اشتراک یا شماره موبایل"
+            textSize = 18f
+            gravity = Gravity.END
+            setSingleLine(true)
+            inputType = InputType.TYPE_CLASS_PHONE
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("جست‌وجوی مشترک")
+            .setMessage("شماره اشتراک یا شماره تماس را وارد کنید:")
+            .setView(input)
+            .setNegativeButton("انصراف", null)
+            .setPositiveButton("جست‌وجو", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
+                    val query = normalizeSearchNumber(
+                        input.text.toString()
+                    )
+
+                    if (query.isBlank()) {
+                        toast("شماره اشتراک یا تماس را وارد کنید.")
+                        return@setOnClickListener
+                    }
+
+                    val matches = subscribers.filter { s ->
+                        normalizeSearchNumber(s.subscription)
+                            .contains(query) ||
+                        normalizeSearchNumber(s.phone)
+                            .contains(query)
+                    }
+
+                    if (matches.isEmpty()) {
+                        toast("مشترکی با این مشخصات یافت نشد.")
+                        return@setOnClickListener
+                    }
+
+                    dialog.dismiss()
+                    showSearchResults(matches)
+                }
+        }
+
+        dialog.show()
+    }
+
+    private fun showSearchResults(matches: List<Subscriber>) {
+        val labels = matches.map { s ->
+            "اشتراک: ${s.subscription}\n" +
+            "موبایل: ${s.phone}\n" +
+            "بدهی: ${s.debt} ریال\n" +
+            "وضعیت: ${
+                when {
+                    s.approval.equals("بله", true) ->
+                        "تأیید شده در اکسل؛ مستثنا از ارسال"
+                    isSent(s) ->
+                        "درخواست ارسال قبلاً ثبت شده"
+                    s.approval.equals("خیر", true) ->
+                        "ارسال نشده؛ تأیید اکسل: خیر"
+                    s.approval.isBlank() ->
+                        "ارسال نشده؛ ستون تأیید خالی است"
+                    else ->
+                        "ارسال نشده؛ مقدار تأیید نیازمند بررسی است"
+                }
+            }"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("نتایج جست‌وجو (${matches.size})")
+            .setItems(labels) { _, which ->
+                val s = matches[which]
+                currentSubscriber = s
+
+                subscriberView.text =
+                    "شماره اشتراک: ${s.subscription}\n" +
+                    "شماره همراه: ${s.phone}\n" +
+                    "مبلغ بدهی: ${s.debt} ریال\n" +
+                    "تأیید ارسال در اکسل: " +
+                    "${s.approval.ifBlank { "خالی؛ نیازمند بررسی" }}\n" +
+                    "وضعیت: ${
+                        when {
+                            s.approval.equals("بله", true) ->
+                                "مستثنا از ارسال"
+                            isSent(s) ->
+                                "درخواست ارسال قبلاً ثبت شده"
+                            else ->
+                                "آماده بررسی"
+                        }
+                    }"
+
+                // متن پیش‌فرض با اطلاعات همین مشترک آماده می‌شود.
+                messageInput.setText(
+                    defaultMessage()
+                        .replace("{شماره اشتراک}", s.subscription)
+                        .replace("{مبلغ بدهی}", s.debt)
+                )
+
+                statusView.text =
+                    "مشترک ${s.subscription} از نتایج جست‌وجو انتخاب شد."
+
+                toast("مشترک انتخاب شد.")
+            }
+            .setNegativeButton("بستن", null)
+            .show()
     }
 
     private fun chooseExcel() {
@@ -338,7 +459,6 @@ class MainActivity : Activity() {
                                 insideSi = true
                                 text.setLength(0)
                             }
-
                             "t" -> if (insideSi) {
                                 text.append(parser.nextText())
                             }
@@ -432,7 +552,6 @@ class MainActivity : Activity() {
 
                         "row" -> {
                             val maxColumn = row.keys.maxOrNull() ?: -1
-
                             result.add(
                                 (0..maxColumn).map { row[it] ?: "" }
                             )
@@ -447,33 +566,24 @@ class MainActivity : Activity() {
         return result.drop(1).mapNotNull { cells ->
             val subscription =
                 cells.getOrElse(0) { "" }.trim()
-
             val phone =
                 cells.getOrElse(1) { "" }.trim()
-
             val debt =
                 cells.getOrElse(2) { "" }
                     .trim()
                     .replace(",", "")
                     .replace("٬", "")
-
             val approval =
                 cells.getOrElse(3) { "" }.trim()
 
             if (subscription.isBlank()) {
                 null
             } else {
-                Subscriber(
-                    subscription,
-                    phone,
-                    debt,
-                    approval
-                )
+                Subscriber(subscription, phone, debt, approval)
             }
         }
     }
 
-    // مقدار «بله» مستثنا است؛ مقدار خالی و «خیر» قابل بررسی هستند.
     private fun isEligible(s: Subscriber): Boolean =
         !s.approval.equals("بله", true) && !isSent(s)
 
@@ -677,13 +787,8 @@ class MainActivity : Activity() {
             it.approval.isBlank()
         }
 
-        val waiting = subscribers.count {
-            isEligible(it)
-        }
-
-        val sent = subscribers.count {
-            isSent(it)
-        }
+        val waiting = subscribers.count { isEligible(it) }
+        val sent = subscribers.count { isSent(it) }
 
         val history = prefs.all
             .filterKeys { it.startsWith("record_") }
@@ -755,16 +860,12 @@ class MainActivity : Activity() {
             val state = when {
                 s.approval.equals("بله", true) ->
                     "مستثنا از ارسال"
-
                 isSent(s) ->
                     "درخواست ارسال ثبت شده؛ تحویل تأیید نشده"
-
                 s.approval.isBlank() ->
                     "ستون تأیید خالی؛ قابل بررسی"
-
                 !s.approval.equals("خیر", true) ->
                     "مقدار تأیید نامشخص"
-
                 else ->
                     "ارسال نشده"
             }
@@ -843,12 +944,10 @@ class MainActivity : Activity() {
 
             rows.forEachIndexed { rowIndex, cells ->
                 val excelRow = rowIndex + 1
-
                 sheet.append("""<row r="$excelRow">""")
 
                 cells.forEachIndexed { colIndex, value ->
                     val ref = columnName(colIndex) + excelRow
-
                     sheet.append(
                         """<c r="$ref" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>"""
                     )
