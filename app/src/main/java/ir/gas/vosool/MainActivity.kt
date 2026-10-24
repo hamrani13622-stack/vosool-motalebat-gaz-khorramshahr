@@ -31,7 +31,9 @@ data class Subscriber(
     val phone: String,
     val debt: String,
     val approval: String,
-    val name: String = ""
+    val name: String = "",
+    val collectionStatus: String = "وصول نشده",
+    val notes: String = ""
 )
 
 class MainActivity : Activity() {
@@ -190,6 +192,8 @@ class MainActivity : Activity() {
                 item.put("phone", s.phone)
                 item.put("debt", s.debt)
                 item.put("approval", s.approval)
+                item.put("collectionStatus", s.collectionStatus)
+                item.put("notes", s.notes)
                 array.put(item)
             }
 
@@ -225,7 +229,12 @@ class MainActivity : Activity() {
                         phone = item.optString("phone"),
                         debt = item.optString("debt"),
                         approval = item.optString("approval"),
-                        name = item.optString("name")
+                        name = item.optString("name"),
+                        collectionStatus = item.optString(
+                            "collectionStatus",
+                            "وصول نشده"
+                        ),
+                        notes = item.optString("notes", "")
                     )
                 )
             }
@@ -275,7 +284,9 @@ class MainActivity : Activity() {
         "شماره همراه: ${s.phone}\n" +
         "مبلغ بدهی: ${s.debt} ریال\n" +
         "تأیید ارسال در اکسل: ${s.approval.ifBlank { "خالی" }}\n" +
-        "وضعیت: ${statusText(s)}"
+        "وضعیت وصول: ${s.collectionStatus}\n" +
+        "توضیحات: ${s.notes.ifBlank { "بدون توضیحات" }}\n" +
+        "وضعیت پیامک: ${statusText(s)}"
 
     private fun selectSubscriber(s: Subscriber) {
         currentSubscriber = s
@@ -345,7 +356,8 @@ class MainActivity : Activity() {
             "${s.name.ifBlank { "نام ثبت نشده" }}\n" +
             "اشتراک: ${s.subscription} | موبایل: ${s.phone}\n" +
             "بدهی: ${s.debt} ریال\n" +
-            "وضعیت: ${statusText(s)}"
+            "وضعیت وصول: ${s.collectionStatus}\n" +
+            "توضیحات: ${s.notes.ifBlank { "ندارد" }}"
         }.toTypedArray()
 
         AlertDialog.Builder(this)
@@ -433,7 +445,11 @@ class MainActivity : Activity() {
             setPadding(28, 8, 28, 8)
         }
 
-        fun field(label: String, value: String): EditText {
+        fun field(
+            label: String,
+            value: String,
+            singleLine: Boolean = true
+        ): EditText {
             form.addView(TextView(this).apply {
                 text = label
                 textSize = 15f
@@ -444,7 +460,13 @@ class MainActivity : Activity() {
                 setText(value)
                 textSize = 16f
                 gravity = Gravity.END
-                setSingleLine(true)
+                setSingleLine(singleLine)
+                if (!singleLine) {
+                    minLines = 3
+                    inputType = InputType.TYPE_CLASS_TEXT or
+                        InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                }
                 form.addView(this)
             }
         }
@@ -453,7 +475,42 @@ class MainActivity : Activity() {
         val subscriptionInput = field("شماره اشتراک", old.subscription)
         val phoneInput = field("شماره موبایل", old.phone)
         val debtInput = field("مبلغ بدهی به ریال", old.debt)
-        val approvalInput = field("تأیید ارسال در اکسل (بله یا خیر)", old.approval)
+        val approvalInput =
+            field("تأیید ارسال در اکسل (بله یا خیر)", old.approval)
+
+        form.addView(TextView(this).apply {
+            text = "وضعیت وصول"
+            textSize = 15f
+            gravity = Gravity.END
+        })
+
+        val collectionStatusInput = EditText(this).apply {
+            setText(old.collectionStatus)
+            textSize = 16f
+            gravity = Gravity.END
+            isFocusable = false
+            isClickable = true
+            hint = "برای انتخاب وضعیت لمس کنید"
+            form.addView(this)
+        }
+
+        val collectionStatuses = arrayOf(
+            "وصول نشده",
+            "وصول ناقص",
+            "وصول کامل"
+        )
+
+        collectionStatusInput.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("انتخاب وضعیت وصول")
+                .setItems(collectionStatuses) { _, which ->
+                    collectionStatusInput.setText(collectionStatuses[which])
+                }
+                .setNegativeButton("انصراف", null)
+                .show()
+        }
+
+        val notesInput = field("توضیحات", old.notes, singleLine = false)
 
         val scroll = ScrollView(this)
         scroll.addView(form)
@@ -468,13 +525,17 @@ class MainActivity : Activity() {
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener {
-                    val subscription = subscriptionInput.text.toString().trim()
+                    val subscription =
+                        subscriptionInput.text.toString().trim()
                     val phone = phoneInput.text.toString().trim()
                     val debt = debtInput.text.toString().trim()
                         .replace(",", "")
                         .replace("٬", "")
                     val approval = approvalInput.text.toString().trim()
                     val name = nameInput.text.toString().trim()
+                    val collectionStatus =
+                        collectionStatusInput.text.toString().trim()
+                    val notes = notesInput.text.toString().trim()
 
                     if (subscription.isBlank()) {
                         toast("شماره اشتراک نمی‌تواند خالی باشد.")
@@ -483,7 +544,7 @@ class MainActivity : Activity() {
 
                     if (subscribers.indices.any {
                             it != index &&
-                            subscribers[it].subscription == subscription
+                                subscribers[it].subscription == subscription
                         }) {
                         toast("این شماره اشتراک برای ردیف دیگری ثبت شده است.")
                         return@setOnClickListener
@@ -499,11 +560,13 @@ class MainActivity : Activity() {
                         phone = phone,
                         debt = debt,
                         approval = approval,
-                        name = name
+                        name = name,
+                        collectionStatus = collectionStatus.ifBlank {
+                            "وصول نشده"
+                        },
+                        notes = notes
                     )
 
-                    // اگر شماره اشتراک یا موبایل عوض شود، سابقه قبلی
-                    // حذف نمی‌شود؛ کلید سابقه پیامک نیز دست‌کاری نمی‌شود.
                     subscribers[index] = updated
 
                     if (currentSubscriber == old) {
@@ -517,7 +580,10 @@ class MainActivity : Activity() {
                         messageInput.setText(
                             defaultMessage()
                                 .replace("{نام مشترک}", updated.name)
-                                .replace("{شماره اشتراک}", updated.subscription)
+                                .replace(
+                                    "{شماره اشتراک}",
+                                    updated.subscription
+                                )
                                 .replace("{مبلغ بدهی}", updated.debt)
                         )
                     }
@@ -526,7 +592,7 @@ class MainActivity : Activity() {
                         "اطلاعات مشترک ${updated.subscription} ذخیره شد."
 
                     dialog.dismiss()
-                    toast("تغییرات ذخیره شد.")
+                    toast("اطلاعات و وضعیت وصول ذخیره شد.")
                 }
         }
 
@@ -558,7 +624,9 @@ class MainActivity : Activity() {
             PICK_EXCEL -> {
                 try {
                     val input = contentResolver.openInputStream(uri)
-                        ?: throw IllegalArgumentException("فایل قابل خواندن نیست.")
+                        ?: throw IllegalArgumentException(
+                            "فایل قابل خواندن نیست."
+                        )
 
                     val rows = input.use { readXlsx(it) }
 
@@ -589,7 +657,9 @@ class MainActivity : Activity() {
             SAVE_EXCEL -> {
                 try {
                     val output = contentResolver.openOutputStream(uri)
-                        ?: throw IllegalArgumentException("امکان ذخیره فایل وجود ندارد.")
+                        ?: throw IllegalArgumentException(
+                            "امکان ذخیره فایل وجود ندارد."
+                        )
 
                     output.use { writeXlsx(it) }
                     toast("گزارش Excel ذخیره شد.")
@@ -615,7 +685,9 @@ class MainActivity : Activity() {
         ZipInputStream(input).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
-                if (!entry.isDirectory) entries[entry.name] = zip.readBytes()
+                if (!entry.isDirectory) {
+                    entries[entry.name] = zip.readBytes()
+                }
                 zip.closeEntry()
             }
         }
@@ -636,7 +708,9 @@ class MainActivity : Activity() {
                             insideSi = true
                             text.setLength(0)
                         }
-                        "t" -> if (insideSi) text.append(parser.nextText())
+                        "t" -> if (insideSi) {
+                            text.append(parser.nextText())
+                        }
                     }
                     XmlPullParser.END_TAG -> if (parser.name == "si") {
                         strings.add(text.toString())
@@ -671,7 +745,9 @@ class MainActivity : Activity() {
                         cellValue = ""
                         insideCell = true
                     }
-                    "v" -> if (insideCell) cellValue = parser.nextText()
+                    "v" -> if (insideCell) {
+                        cellValue = parser.nextText()
+                    }
                     "t" -> if (insideCell && cellType == "inlineStr") {
                         cellValue += parser.nextText()
                     }
@@ -688,7 +764,9 @@ class MainActivity : Activity() {
                         column--
 
                         val value = if (cellType == "s") {
-                            strings.getOrNull(cellValue.toIntOrNull() ?: -1) ?: ""
+                            strings.getOrNull(
+                                cellValue.toIntOrNull() ?: -1
+                            ) ?: ""
                         } else {
                             cellValue
                         }
@@ -704,25 +782,32 @@ class MainActivity : Activity() {
 
         if (rows.isEmpty()) return emptyList()
 
-        val firstRow = rows.first()
-        val headers = firstRow.mapValues { normalizeHeader(it.value) }
+        val headers = rows.first().mapValues {
+            normalizeHeader(it.value)
+        }
 
         fun findColumn(vararg terms: String): Int? =
             headers.entries.firstOrNull { entry ->
-                terms.any { term -> entry.value.contains(normalizeHeader(term)) }
+                terms.any { term ->
+                    entry.value.contains(normalizeHeader(term))
+                }
             }?.key
 
-        val subscriptionCol = findColumn("شماره اشتراک", "اشتراک")
-        val nameCol = findColumn("نام مشترک", "نام و نام خانوادگی", "نام")
-        val phoneCol = findColumn("شماره همراه", "شماره موبایل", "موبایل", "تلفن")
-        val debtCol = findColumn("مبلغ بدهی", "بدهی", "مبلغ")
-        val approvalCol = findColumn("تأیید ارسال", "تایید ارسال", "تأیید", "تایید")
+        val subscriptionCol =
+            findColumn("شماره اشتراک", "اشتراک")
+        val nameCol =
+            findColumn("نام مشترک", "نام و نام خانوادگی", "نام")
+        val phoneCol =
+            findColumn("شماره همراه", "شماره موبایل", "موبایل", "تلفن")
+        val debtCol =
+            findColumn("مبلغ بدهی", "بدهی", "مبلغ")
+        val approvalCol =
+            findColumn("تأیید ارسال", "تایید ارسال", "تأیید", "تایید")
 
         val hasHeader = subscriptionCol != null &&
             (phoneCol != null || debtCol != null)
 
         val dataRows = if (hasHeader) rows.drop(1) else rows
-
         val subIndex = if (hasHeader) subscriptionCol!! else 0
         val nameIndex = if (hasHeader) nameCol else null
         val phoneIndex = if (hasHeader) phoneCol ?: 1 else 1
@@ -740,7 +825,9 @@ class MainActivity : Activity() {
                 subscription = subscription,
                 name = value(nameIndex),
                 phone = value(phoneIndex),
-                debt = value(debtIndex).replace(",", "").replace("٬", ""),
+                debt = value(debtIndex)
+                    .replace(",", "")
+                    .replace("٬", ""),
                 approval = value(approvalIndex)
             )
         }
@@ -760,7 +847,8 @@ class MainActivity : Activity() {
         if (next == null) {
             currentSubscriber = null
             subscriberView.text =
-                "مشترک واجد شرایط دیگری برای نمایش وجود ندارد.\nگزارش وضعیت را بررسی کنید."
+                "مشترک واجد شرایط دیگری برای نمایش وجود ندارد.\n" +
+                "گزارش وضعیت را بررسی کنید."
             return
         }
 
@@ -860,9 +948,13 @@ class MainActivity : Activity() {
             val parts = manager.divideMessage(message)
 
             if (parts.size > 1) {
-                manager.sendMultipartTextMessage(s.phone, null, parts, null, null)
+                manager.sendMultipartTextMessage(
+                    s.phone, null, parts, null, null
+                )
             } else {
-                manager.sendTextMessage(s.phone, null, message, null, null)
+                manager.sendTextMessage(
+                    s.phone, null, message, null, null
+                )
             }
 
             val record =
@@ -895,7 +987,9 @@ class MainActivity : Activity() {
         permissions: Array<out String>,
         grantResults: IntArray
     ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        super.onRequestPermissionsResult(
+            requestCode, permissions, grantResults
+        )
 
         if (requestCode == SMS_PERMISSION) {
             if (
@@ -910,7 +1004,9 @@ class MainActivity : Activity() {
     }
 
     private fun showReport() {
-        val excluded = subscribers.count { it.approval.equals("بله", true) }
+        val excluded = subscribers.count {
+            it.approval.equals("بله", true)
+        }
         val needsReview = subscribers.count {
             it.approval.isNotBlank() &&
                 !it.approval.equals("بله", true) &&
@@ -920,6 +1016,16 @@ class MainActivity : Activity() {
         val waiting = subscribers.count { isEligible(it) }
         val sent = subscribers.count { isSent(it) }
 
+        val collected = subscribers.count {
+            it.collectionStatus == "وصول کامل"
+        }
+        val partial = subscribers.count {
+            it.collectionStatus == "وصول ناقص"
+        }
+        val notCollected = subscribers.count {
+            it.collectionStatus == "وصول نشده"
+        }
+
         val history = prefs.all
             .filterKeys { it.startsWith("record_") }
             .values
@@ -928,6 +1034,9 @@ class MainActivity : Activity() {
 
         val report =
             "تعداد رکوردهای فایل فعلی: ${subscribers.size}\n" +
+            "وصول کامل: $collected\n" +
+            "وصول ناقص: $partial\n" +
+            "وصول نشده: $notCollected\n\n" +
             "تأیید بله، مستثنا: $excluded\n" +
             "ستون تأیید خالی: $blankApproval\n" +
             "مقدار تأیید نامشخص: $needsReview\n" +
@@ -983,7 +1092,9 @@ class MainActivity : Activity() {
                 "شماره همراه",
                 "مبلغ بدهی به ریال",
                 "تأیید ارسال پیامک",
-                "وضعیت"
+                "وضعیت وصول",
+                "توضیحات",
+                "وضعیت پیامک"
             )
         )
 
@@ -995,6 +1106,8 @@ class MainActivity : Activity() {
                     s.phone,
                     s.debt,
                     s.approval,
+                    s.collectionStatus,
+                    s.notes,
                     statusText(s)
                 )
             )
