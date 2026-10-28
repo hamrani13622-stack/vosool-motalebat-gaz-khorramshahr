@@ -1,3 +1,7 @@
+import java.io.InputStream
+import java.util.zip.ZipInputStream
+import android.util.Xml
+import org.xmlpull.v1.XmlPullParser
 private fun normalizeHeader(value: String): String =
     value.trim()
         .replace("ي", "ی")
